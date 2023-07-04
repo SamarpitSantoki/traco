@@ -1,11 +1,11 @@
-import { appWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { app, path, event } from "@tauri-apps/api";
+import { path, event } from "@tauri-apps/api";
 import { readTextFile } from "@tauri-apps/api/fs";
 
 function App() {
   const [data, setData] = useState([]);
+  const [tracking, setTracking] = useState(false);
 
   // make a function that reads a json file from /Documents/Traco/ and returns the data
   async function readJsonFile() {
@@ -60,18 +60,35 @@ function App() {
   }
 
   useEffect(() => {
-    readJsonFile();
-
+    invoke("start_tracking")
+      .then((res) => {
+        console.log(res);
+        setTracking(true);
+      })
+      .catch((err) => {
+        console.log(err);
+      });
     // listen for the event
     event.listen("tracking", (data) => {
       console.log(data);
       readJsonFile();
     });
+    event.listen("stop_tracking", (data) => {
+      setTracking(false);
+    });
   }, []);
 
   return (
     <div>
-      <div>Welcome Samarpit!</div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+        }}
+      >
+        <span>Welcome Samarpit!</span>
+        <span>Tracking: {tracking ? "Yes" : "No"} </span>
+      </div>
 
       <button
         onClick={() => {
@@ -81,19 +98,37 @@ function App() {
         Get Data
       </button>
 
-      <button
-        onClick={() => {
-          invoke("tracking")
-            .then((res) => {
-              console.log(res);
-            })
-            .catch((err) => {
-              console.log(err);
-            });
-        }}
-      >
-        Start
-      </button>
+      {tracking ? (
+        <button
+          onClick={() => {
+            invoke("stop_tracking")
+              .then((res) => {
+                console.log(res);
+              })
+              .catch((err) => {
+                console.log(err);
+              });
+          }}
+        >
+          Stop
+        </button>
+      ) : (
+        <button
+          onClick={() => {
+            invoke("start_tracking")
+              .then((res) => {
+                console.log(res);
+                setTracking(true);
+              })
+              .catch((err) => {
+                console.log(err);
+              });
+          }}
+        >
+          Start
+        </button>
+      )}
+
       <div className="main-container">
         <table
           style={{

@@ -3,39 +3,42 @@
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
+use std::sync::Mutex;
 use std::time::SystemTime;
 use std::{collections::HashMap, io::Read};
+use tauri::State;
 use tauri::{CustomMenuItem, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem};
 use tauri::{Manager, SystemTray, Window};
 use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW};
+use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Item {
     name: String,
     start_time: u64,
     duration: u64,
 }
 
-// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+struct AppState {
+    keep_running: Mutex<bool>,
 }
 
-#[tauri::command]
-fn tracking(window: Window) -> String {
-    // spawn a new process to run the tracking app
 
-    std::thread::spawn(move || {
-        app(window);
-    });
-
-    format!("Tracking started")
-}
 #[derive(Clone, serde::Serialize)]
 struct Payload {
     args: Vec<String>,
     cwd: String,
+}
+
+
+#[tauri::command]
+fn start_tracking(window: Window) -> String {
+    // spawn a new process to run the tracking app and return pid
+    std::thread::spawn(move || {
+        init_tracking(window);
+    });
+
+    format!("Tracking started")
 }
 
 fn main() {
@@ -105,20 +108,35 @@ fn main() {
             },
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![greet, tracking])
+        .manage(AppState {
+            keep_running: Mutex::new(false),
+        })
+        .invoke_handler(tauri::generate_handler![start_tracking, stop_tracking])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
     // app();
 }
 
-fn app(window: tauri::Window) {
+fn init_tracking(window: tauri::Window) {
+    let state: State<AppState> = window.state();
+    let mut keep_running = state.keep_running.lock().unwrap();
+    
+    if *keep_running {
+        println!("Tracking already started");
+        return;
+    }
+    
+    *keep_running = true;
+
+
+
+    let process_id = Uuid::new_v4();
     let mut info: HashMap<String, Item> = HashMap::new();
 
     // keep track of current window title
 
     let mut current_window_title = String::new();
-    let up_time = SystemTime::now();
     let mut timer = SystemTime::now();
 
     // save to Desktop
@@ -129,19 +147,26 @@ fn app(window: tauri::Window) {
         std::fs::create_dir(&desktop).unwrap();
     }
 
-    let mut file = File::open(desktop.clone() + "data.json")
-        .unwrap_or(File::create(desktop.clone() + "data.json").unwrap());
+    // read a json file
 
+    let mut file = File::open(desktop.clone() + "data.json").unwrap();
     let mut data = String::new();
     file.read_to_string(&mut data).unwrap();
+
 
     if data.len() > 0 {
         info = serde_json::from_str(&data).unwrap();
     }
 
-    loop {
-        // get current window title
+    println!("Tracking Starting");
 
+    println!("Tracking Started - {}",*keep_running );
+
+    let run = keep_running.clone();
+    drop(keep_running);
+
+    while  run {
+        // get current window title
         let window_title = get_window_title();
 
         if info.contains_key(&window_title) {
@@ -165,24 +190,19 @@ fn app(window: tauri::Window) {
 
         // if window title has changed
         if window_title != current_window_title {
-            // print window title
-
-            println!("{}", window_title);
-
-            // update current window title
-
             current_window_title = window_title;
         }
 
         // every 5 seconds
 
-        println!("{} seconds left", timer.elapsed().unwrap().as_secs());
         if timer.elapsed().unwrap().as_secs() > 5 {
+            println!("Saving - {}", process_id);
             // let mut file = File::create("data.json").unwrap();
             let mut file = File::create(desktop.clone() + "data.json").unwrap();
             let json = serde_json::to_string(&info).unwrap();
             file.write_all(json.as_bytes()).unwrap();
             println!("Saved");
+
             timer = SystemTime::now();
 
             window
@@ -193,9 +213,28 @@ fn app(window: tauri::Window) {
         // sleep for 1 second
 
         std::thread::sleep(std::time::Duration::from_secs(1));
+
+        if state.keep_running.lock().unwrap().clone() == false {
+            window
+                .emit("stop_tracking", Some("Stopped".to_string()))
+                .unwrap();
+            break;
+        }
+
     }
 
     // gracefully handle exit
+}
+
+#[tauri::command]
+fn stop_tracking(window: Window) {
+    let state: State<AppState> = window.state();
+
+    let mut keep_running = state.keep_running.lock().unwrap();
+
+    *keep_running = false;
+
+    drop(keep_running);
 }
 
 fn get_window_title() -> String {

@@ -3341,6 +3341,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "uuid",
  "winapi",
  "winapi-util",
 ]
